@@ -1,1 +1,100 @@
- python .\serial_to_wheel_w10.py                              Traceback (most recent call last):                                                                                        File "C:\Users\IKAPUSNI\OneDrive\OneDrive - JLR\Desktop\ACES\serial_to_wheel_w10.py", line 13, in <module>                j = pyvjoy.VJoyDevice(1)                                                                                                    ^^^^^^^^^^^^^^^^^^^^                                                                                              File "C:\Program Files\Python312\Lib\site-packages\pyvjoy\vjoydevice.py", line 24, in __init__                            _sdk.vJoyEnabled()                                                                                                    File "C:\Program Files\Python312\Lib\site-packages\pyvjoy\_sdk.py", line 30, in vJoyEnabled                               raise vJoyNotEnabledException()                                                                                     pyvjoy.exceptions.vJoyNotEnabledException                                                                               PS C:\Users\IKAPUSNI\OneDrive\OneDrive - JLR\Desktop\ACES> python .\serial_to_wheel_w10.py                              Traceback (most recent call last):                                                                                        File "C:\Users\IKAPUSNI\OneDrive\OneDrive - JLR\Desktop\ACES\serial_to_wheel_w10.py", line 13, in <module>                j = pyvjoy.VJoyDevice(0)                                                                                                    ^^^^^^^^^^^^^^^^^^^^                                                                                              File "C:\Program Files\Python312\Lib\site-packages\pyvjoy\vjoydevice.py", line 24, in __init__                            _sdk.vJoyEnabled()                                                                                                 File "C:\Program Files\Python312\Lib\site-packages\pyvjoy\_sdk.py", line 30, in vJoyEnabled                               raise vJoyNotEnabledException()                                                                                     pyvjoy.exceptions.vJoyNotEnabledException   
+extends VehicleBody3D
+
+@onready var http_handler = $HTTPHandler/HTTPRequest
+
+var eventMap = {
+	0: "OBJECTPASSED",
+	1: "TOOCLOSE",
+	2: "NOSIGNAL",
+	3: "SIGNAL",
+	4: "FAILEDSTOP",
+	5: "STOPPED",
+	6: "HITCURB",
+	7: "WRONGLANE",
+	8: "SPEEDING"
+}
+
+#Car physics variables
+var max_rpm = 500
+var max_torque = 200
+
+#Indicator and stop variables
+var left_indicator_on = false
+var right_indicator_on = false
+var is_stopped = false
+
+#Indicator light variables
+@onready var left_light = $left_indicator
+@onready var right_light = $right_indicator
+
+var blink_timer = 0.0
+var blink_interval = 0.1
+var lights_on = false
+
+func _input(event):
+	# Toggle indicators
+	if event is InputEventJoypadButton:
+		print("Axis:", event.button_index)
+
+	if Input.is_action_just_pressed("left_indicator"):
+		left_indicator_on = !left_indicator_on
+		right_indicator_on = false  #Turn off right when left is toggled
+
+	if Input.is_action_just_pressed("right_indicator"):
+		right_indicator_on = !right_indicator_on
+		left_indicator_on = false  #Turn off left when right is toggled
+
+var location_timer := 0.0
+
+func _process(delta):
+	var pos = global_transform.origin
+	location_timer += delta
+	if location_timer >= 1.0:
+		location_timer = 0.0
+		sendLocation()
+
+func _physics_process(delta):
+	#Car movement
+	steering = -(Input.get_joy_axis(0, JOY_AXIS_LEFT_X)) #lerp(steering, -(Input.get_joy_axis(0, JOY_AXIS_LEFT_X)), 0.3)
+	#print(steering)
+	var acceleration = Input.get_axis("forward", "back")
+	var rpm = $Back_left_wheel.get_rpm()
+	$Back_left_wheel.engine_force = acceleration * max_torque * (1 - rpm / max_rpm)
+	rpm = $Back_right_wheel.get_rpm()
+	$Back_right_wheel.engine_force = acceleration * max_torque * (1 - rpm / max_rpm)
+
+	# Check if car is stopped (threshold can be adjusted)
+	is_stopped = linear_velocity.length() < 1.0
+
+	#Indicator Blinking Logic
+	if left_indicator_on or right_indicator_on:
+		blink_timer += delta
+		if blink_timer >= blink_interval:
+			blink_timer = 0.0
+			lights_on = !lights_on
+			update_indicator_lights()
+	else:
+		#Turn off both indicator lights when no indicator is active
+		left_light.light_energy = 0.0
+		right_light.light_energy = 0.0
+		lights_on = false
+
+func update_indicator_lights():
+	var energy = 1.0 if lights_on else 0.0
+
+	#Only blink the light for the relevant indicator
+	left_light.light_energy = energy if left_indicator_on else 0.0
+	right_light.light_energy = energy if right_indicator_on else 0.0
+
+var sending_location := false
+
+func sendLocation():
+	if sending_location:
+		return
+	sending_location = true
+
+	var pos = global_transform.origin
+	var arraytest: Array[float] = [pos.x, pos.z]
+	var test = await http_handler.send_location(GlobalData.user_id, arraytest)
+
+	sending_location = false
